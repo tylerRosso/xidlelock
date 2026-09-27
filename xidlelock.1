@@ -1,0 +1,167 @@
+.\" SPDX-License-Identifier: ISC
+.Dd September 27, 2026
+.Dt XIDLELOCK 1
+.Os
+.Sh NAME
+.Nm xidlelock
+.Nd lock the X session when the screen saver activates
+.Sh SYNOPSIS
+.Nm
+.Op Fl \-
+.Op Ar locker Op Ar argument ...
+.Nm
+.Fl h | v
+.Sh DESCRIPTION
+.Nm
+waits for the X server's own screen saver to activate and then starts a
+screen locker,
+.Xr slock 1
+unless another is named.
+The server decides when the user has gone away, after the idle time set with
+.Ql xset s Ar seconds ,
+so there is no timer here: between activations
+.Nm
+is asleep in a single
+.Xr ppoll 2 .
+.Ql xset s activate
+turns the saver on at once, which makes it a lock-now command as well.
+.Pp
+Everything from the first operand on is the locker's command line, passed
+through verbatim, options included:
+.Ql xidlelock slock -v
+hands
+.Fl v
+to
+.Xr slock 1 .
+The
+.Ar locker
+is looked up in
+.Ev PATH .
+.Pp
+.Nm
+locks on a ScreenSaverNotify event with state On, and on nothing else: not
+when the saver turns off or cycles.
+While the locker it started is still running, an activation starts nothing,
+since the saver times out again on an already locked screen as soon as the
+user walks away.
+.Pp
+The locker is never stopped by
+.Nm :
+not when it exits, not on a signal, not when the X server goes away.
+It runs in a session of its own, so a Ctrl-C or a hangup aimed at the terminal
+.Nm
+was started from cannot reach it, and it gets the signal state
+.Nm
+itself was started with.
+.Pp
+A locker that exits with a non-zero status or is killed by a signal is
+reported on standard error, and so is one that cannot be run at all;
+.Nm
+carries on and tries again at the next activation.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl h , Fl \-help
+Print a usage message on standard output and exit.
+.It Fl v , Fl \-version
+Print the version on standard output and exit.
+.It Fl \-
+End the options, so that
+.Ar locker
+may begin with
+.Ql - .
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width XAUTHORITY
+.It Ev DISPLAY
+The display to lock.
+Only local displays are supported, such as
+.Ql :0 ,
+.Ql unix:0
+or
+.Ql :0.0 .
+.It Ev XAUTHORITY
+The file the display's MIT-MAGIC-COOKIE-1 is read from.
+Without it,
+.Pa $HOME/.Xauthority .
+A missing file or cookie is not an error in itself; a server that requires one
+refuses the connection.
+.It Ev PATH
+Where the
+.Ar locker
+is looked up.
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/.Xauthority
+The default authority file.
+.It Pa /tmp/.X11-unix/X Ns Ar n
+The socket of display
+.Ar n .
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 after
+.Fl h
+or
+.Fl v ,
+and when
+.Dv SIGINT ,
+.Dv SIGTERM
+or
+.Dv SIGHUP
+ends it.
+It exits 1 on an unknown option, an unset, malformed or remote
+.Ev DISPLAY ,
+a server it cannot connect to or that refuses the connection, a server
+without the MIT-SCREEN-SAVER extension, an X error, or the server closing the
+connection.
+.Sh EXAMPLES
+Lock after ten idle minutes, from
+.Pa ~/.xinitrc :
+.Bd -literal -offset indent
+xset s 600
+xidlelock &
+exec dwm
+.Ed
+.Pp
+Lock at once, for example from a key binding:
+.Dl $ xset s activate
+.Pp
+Use
+.Xr i3lock 1 ,
+which must be told not to fork:
+.Dl $ xidlelock i3lock -n
+.Sh SEE ALSO
+.Xr i3lock 1 ,
+.Xr slock 1 ,
+.Xr xautolock 1 ,
+.Xr xset 1 ,
+.Xr xss-lock 1
+.Sh CAVEATS
+.Nm
+does not lock before suspend; that needs logind, which
+.Xr xss-lock 1
+speaks.
+.Pp
+The locker has to stay in the foreground until the screen is unlocked.
+One that forks and exits at once looks finished, and every activation starts
+another.
+.Pp
+Only lockers
+.Nm
+started are known to it.
+An activation during a lock started some other way, by a key binding running
+.Xr slock 1 ,
+say, starts a second locker, which cannot grab the keyboard and exits with an
+error.
+Locking by hand with
+.Ql xset s activate
+avoids this.
+.Pp
+.Ql xset s off
+means the saver, and so the lock, never comes on by itself.
+DPMS has timers of its own: if the monitor powers down before the saver
+timeout, the lock still waits for the saver.
+.Pp
+Only the first screen's root window is watched; monitors that share one
+screen, as Xinerama and RandR monitors do, are all covered.
