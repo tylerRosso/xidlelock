@@ -12,7 +12,9 @@
  * that hard-coded the first cannot pass. Events are sent on command: each line
  * written to the CONTROL fifo is one of
  *
- *   on        ScreenSaverNotify, state On (1)
+ *   on        ScreenSaverNotify, state On (1), as the idle timeout sends it
+ *   forced    ScreenSaverNotify, state On, forced: what a real server sends for
+ *             ForceScreenSaver (`xset s activate`) and a DPMS power-down
  *   off       ScreenSaverNotify, state Off (0)
  *   cycle     ScreenSaverNotify, state Cycle (2)
  *   sent      ScreenSaverNotify, state On, with the SendEvent bit (0x80) set
@@ -298,8 +300,9 @@ static bool send_error(int file_descriptor, uint8_t code, uint8_t major, uint8_t
 }
 
 /* ScreenSaverNotify: code, state, sequence, time, root, saver window, kind,
- * forced, then padding to 32 bytes. */
-static bool send_saver_notify(int file_descriptor, uint8_t code, uint8_t state)
+ * forced, then padding to 32 bytes. A real server sets forced for everything
+ * but its own idle timeout. */
+static bool send_saver_notify(int file_descriptor, uint8_t code, uint8_t state, uint8_t forced)
 {
 	uint8_t packet[32];
 
@@ -312,7 +315,7 @@ static bool send_saver_notify(int file_descriptor, uint8_t code, uint8_t state)
 	put32(packet + 8, FAKE_ROOT_WINDOW);
 	put32(packet + 12, 0x00400001u);
 	packet[16] = 0; /* kind: blanked */
-	packet[17] = 0; /* forced: no */
+	packet[17] = forced;
 
 	return write_all(file_descriptor, packet, sizeof packet);
 }
@@ -442,13 +445,15 @@ static bool run_command(int file_descriptor, const char *name)
 	}
 
 	if (strcmp(name, "on") == 0)
-		sent = send_saver_notify(file_descriptor, saver_first_event, 1);
+		sent = send_saver_notify(file_descriptor, saver_first_event, 1, 0);
+	else if (strcmp(name, "forced") == 0)
+		sent = send_saver_notify(file_descriptor, saver_first_event, 1, 1);
 	else if (strcmp(name, "off") == 0)
-		sent = send_saver_notify(file_descriptor, saver_first_event, 0);
+		sent = send_saver_notify(file_descriptor, saver_first_event, 0, 0);
 	else if (strcmp(name, "cycle") == 0)
-		sent = send_saver_notify(file_descriptor, saver_first_event, 2);
+		sent = send_saver_notify(file_descriptor, saver_first_event, 2, 0);
 	else if (strcmp(name, "sent") == 0)
-		sent = send_saver_notify(file_descriptor, (uint8_t)(saver_first_event | 0x80u), 1);
+		sent = send_saver_notify(file_descriptor, (uint8_t)(saver_first_event | 0x80u), 1, 0);
 	else if (strcmp(name, "mapping") == 0)
 		sent = send_mapping_notify(file_descriptor);
 	else if (strcmp(name, "error") == 0)
