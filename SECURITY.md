@@ -23,7 +23,7 @@ You can expect an acknowledgement within 10 days, and a fix or an explanation be
 
 - Getting past the locker's own lock screen: report that to the locker's project (slock, i3lock, …).
 - The limits the manual documents under CAVEATS: no lock before suspend, a locker that forks, a lock started outside
-  xidlelock, `xset s off`, and DPMS timers.
+  xidlelock, and no lock by itself once `xset s off` and `xset -dpms` have turned both timeouts off.
 
 ## Supported versions
 

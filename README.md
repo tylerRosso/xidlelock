@@ -94,10 +94,11 @@ xidlelock                   # slock, each time the saver activates
 xidlelock i3lock -n         # -n: i3lock must not fork, see below
 ```
 
-**When it locks.** On a `ScreenSaverNotify` with state *On*: the saver's idle timeout, or `xset s activate`. Not when
-the saver turns off, cycles, or anything else arrives. The timeout is the server's — `xset q` shows it — and `xset s
-off` means the saver, and so the lock, never comes on by itself. DPMS has timers of its own: if the monitor powers down
-before the saver timeout, the lock still waits for the saver.
+**When it locks.** On a `ScreenSaverNotify` with state *On*: the saver's idle timeout, `xset s activate`, or DPMS
+powering the monitor down, by its own timers or on `xset dpms force off` — the server turns the saver on before it
+does. Not when the saver turns off, cycles, or anything else arrives. The timeouts are the server's, `xset q` shows
+both, and the lock comes with whichever expires first. `xset s off` stops only the saver's own: with DPMS still on,
+the lock comes when the monitor powers down, and with `xset -dpms` as well, nothing locks by itself.
 
 **One locker at a time.** An activation while the locker it started is still running starts nothing, since the saver
 times out again on an already locked screen as soon as you walk away. The locker therefore has to **stay in the

@@ -25,6 +25,10 @@ is asleep in a single
 .Xr ppoll 2 .
 .Ql xset s activate
 turns the saver on at once, which makes it a lock-now command as well.
+The server also turns the saver on whenever DPMS powers the monitor down, by
+its own timers or on
+.Ql xset dpms force off ,
+so the lock comes with whichever timeout expires first.
 .Pp
 Everything from the first operand on is the locker's command line, passed
 through verbatim, options included:
@@ -159,9 +163,11 @@ Locking by hand with
 avoids this.
 .Pp
 .Ql xset s off
-means the saver, and so the lock, never comes on by itself.
-DPMS has timers of its own: if the monitor powers down before the saver
-timeout, the lock still waits for the saver.
+stops only the saver's own timeout: while DPMS is on, the lock still comes
+when the monitor powers down.
+With
+.Ql xset -dpms
+as well, nothing locks by itself.
 .Pp
 Only the first screen's root window is watched; monitors that share one
 screen, as Xinerama and RandR monitors do, are all covered.
