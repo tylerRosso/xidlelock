@@ -136,7 +136,7 @@ Runnable from any directory, by absolute path, or through a symlink. A full rebu
 incremental build: one compile-and-link, always from scratch. Every build regenerates `compile_commands.json` via
 `clang -MJ`, so clangd sees the real flags and musl sysroot.
 
-The release binary is 54912 bytes at every level from `-O1` to `-Oz`. The debug build carries
+The release binary is 54928 bytes at every level from `-O1` to `-Oz`. The debug build carries
 `-fsanitize=undefined,local-bounds -fsanitize-minimal-runtime`, the only sanitizer that links against static musl. For a
 full ASan run, build a throwaway dynamic binary with the system compiler:
 
