@@ -91,7 +91,7 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **Every test must be seen to fail.** Break `main.c` deliberately, watch that test go red, restore. A test never
   observed failing is worse than none — it reads as coverage. The suite was swept with 37 such mutations, one or more
   per test, and every one was caught — after the sweep had found three of the traps below: the shell's signal mask,
-  the inherited blocked signal, and the MappingNotify byte. The 20 caught since, by the tests and assertions added
+  the inherited blocked signal, and the MappingNotify byte. The 21 caught since, by the tests and assertions added
   after the sweep, are recorded in those tests' comment blocks; record the mutation there for any new test, and for a
   regression test.
 - **Proving that something did not happen needs a point after which it would have.** `lock-other-events` sends the
@@ -158,10 +158,11 @@ User-facing documentation is in `README.md`; this file is for people changing th
   separately, which musl-clang could not do under the gate anyway.
 - **`xwire.h` is a byte-for-byte copy of xrootclock's.** It is the X11 transport and nothing else — DISPLAY parsing,
   the `.Xauthority` cookie, connect, handshake, `x_sync`, `x_drain` — and it may depend on the includer only through
-  `PROGRAM_NAME`. Change it in xrootclock first, then copy it here in a commit of its own; `cmp` the two before
-  committing. This program uses neither `x_sync` nor `x_drain`, which is why the header turns `-Wunused-function` off
-  between a `push` and a `pop` of its own. Requests specific to this program (`QueryExtension`,
-  `ScreenSaverSelectInput`) stay in `main.c`.
+  `PROGRAM_NAME`. Change it in xrootclock first, then copy it here in a commit of its own. `wire-sync` compares the two,
+  reading xrootclock's working tree in the checkout beside this one or the one `XROOTCLOCK` names, and skips without
+  either; a fix made there and not yet copied is red here at once. This program uses neither `x_sync` nor `x_drain`,
+  which is why the header turns `-Wunused-function` off between a `push` and a `pop` of its own. Requests specific to
+  this program (`QueryExtension`, `ScreenSaverSelectInput`) stay in `main.c`.
 - **Never kill the locker.** Not on exit, not on a signal, not when the server goes away: a dead locker is an unlocked
   screen. `signal-exit` pins it.
 - **The locker gets a session of its own and the signal state this program started with**: `POSIX_SPAWN_SETSID`,

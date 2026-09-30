@@ -174,7 +174,7 @@ TEST_TIMEOUT=120 ./build.sh test   # slower machine
 ```
 
 ```
-27 passed, 0 failed, 1 skipped, 0 errored
+28 passed, 0 failed, 1 skipped, 0 errored
 ```
 
 **Black box only** — every test runs the built binary and checks what it did. `tests/fakex.c` is a fake X server that
@@ -183,7 +183,7 @@ never touches a real display and never runs the real `slock`: a stand-in locker 
 Tests assert against literal protocol numbers, never the program's own macros, and the extension's opcode and event
 are checked at two different values, since a real server assigns them at startup.
 
-Every test has been seen to fail: 57 deliberate breakages of the program, `build.sh` and the manual, each caught by the
+Every test has been seen to fail: 58 deliberate breakages of the program, `build.sh` and the manual, each caught by the
 suite. `doc-manpage` lints the manual and checks that it lists exactly the options the program's usage does; it needs
 `mandoc`, and is skipped without it.
 
@@ -216,7 +216,8 @@ once. `SIGCHLD` interrupts the wait so an exited locker is reaped immediately, n
 
 **The transport is shared.** `xwire.h` — DISPLAY parsing, the `.Xauthority` cookie, connect, handshake — is a
 byte-for-byte copy of the one in xrootclock, a root-window clock built the same way. A fix to it is made there and
-copied here.
+copied here; `wire-sync` compares the two copies when a checkout of xrootclock sits beside this one, or where
+`XROOTCLOCK` says.
 
 **Local displays only.** `DISPLAY` must be `:0`, `unix:0` or `:0.0`; TCP is not supported.
 
@@ -232,7 +233,7 @@ copied here.
 ├── build.sh                 # release | debug | run | test | install | uninstall | clean
 ├── tests/init.sh            # harness, modelled on gnulib/coreutils init.sh
 ├── tests/fakex.c            # fake X server with MIT-SCREEN-SAVER, so tests never touch a real display
-├── tests/*.sh               # 28 black-box tests
+├── tests/*.sh               # 29 black-box tests
 ├── .clang-format            # clang-format style for the C files
 ├── .gitignore
 ├── .vscode/                 # lldb-dap launch config and build tasks, tracked on purpose
