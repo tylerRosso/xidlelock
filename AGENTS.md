@@ -80,6 +80,11 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - `./build.sh test` builds the program and `tests/fakex.c`, then runs every `tests/*.sh`. `tests/init.sh` is the harness
   and is skipped by the runner.
 - **Black box only. Do not add C unit tests.** Every test runs the built binary and checks what it did.
+- **`xwire.h`'s parsers were fuzzed in xrootclock, where the header is maintained**, under ASan+UBSan, and came back
+  clean. Its `AGENTS.md` records 275k inputs and an exhaustive boundary sweep, a figure that has stood there since its
+  initial import, and its commit `ecfa9b4` 1.79M more through `load_cookie` as rewritten, the version copied here.
+  Every other function in the header is unchanged since that import. Neither repository keeps a harness (the 1.79M
+  run's was throwaway), so a change to a parser is not covered by that fuzzing until someone fuzzes it again.
 - **The suite must never run the real `slock`.** Every test names its locker, a stand-in from `make_locker_`, except
   `args-default`, which puts a stand-in `slock` first on `PATH` and refuses to start the program unless `command -v
   slock` resolves to it.
