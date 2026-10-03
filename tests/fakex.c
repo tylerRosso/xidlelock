@@ -39,6 +39,8 @@
  *          error    answer ScreenSaverSelectInput with an X error (code 9)
  *          split    send every reply and event in two writes, to exercise
  *                   short reads
+ *          deaf     stop reading, then answer the connection setup, so the
+ *                   client's first request fails with EPIPE
  *
  * Log lines:
  *   LISTENING <path>
@@ -78,7 +80,8 @@ enum mode
 	MODE_REFUSE,
 	MODE_NOSAVER,
 	MODE_ERROR,
-	MODE_SPLIT
+	MODE_SPLIT,
+	MODE_DEAF
 };
 
 static volatile sig_atomic_t running = 1;
@@ -540,6 +543,27 @@ static void serve(int file_descriptor, int control)
 		return;
 	}
 
+	/* Stopped reading first, so the client's next write fails with EPIPE
+	 * however soon it comes. A server that only closed the connection after
+	 * answering would race that write: one that came first would succeed, and
+	 * the client would read the end of the stream instead. */
+	if (server_mode == MODE_DEAF)
+	{
+		if (shutdown(file_descriptor, SHUT_RD) != 0)
+		{
+			perror("fakex: shutdown");
+
+			return;
+		}
+
+		(void)send_setup_success(file_descriptor);
+
+		printf("DISCONNECT\n");
+		fflush(stdout);
+
+		return;
+	}
+
 	if (!send_setup_success(file_descriptor))
 		return;
 
@@ -591,7 +615,7 @@ int main(int argc, char *argv[])
 
 	if (argc != 4)
 	{
-		fprintf(stderr, "usage: fakex DISPLAYNUM ok|moved|refuse|nosaver|error|split CONTROL\n");
+		fprintf(stderr, "usage: fakex DISPLAYNUM ok|moved|refuse|nosaver|error|split|deaf CONTROL\n");
 
 		return 2;
 	}
@@ -614,6 +638,8 @@ int main(int argc, char *argv[])
 		server_mode = MODE_ERROR;
 	else if (strcmp(mode_name, "split") == 0)
 		server_mode = MODE_SPLIT;
+	else if (strcmp(mode_name, "deaf") == 0)
+		server_mode = MODE_DEAF;
 	else
 	{
 		fprintf(stderr, "fakex: unknown mode '%s'\n", mode_name);

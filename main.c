@@ -324,6 +324,14 @@ int main(int argc, char *argv[])
 	/* An absent cookie is fine; an access-controlled server will say no. */
 	(void)load_cookie(display_number, cookie, &cookie_length);
 
+	/* A dead X server must surface as a write error, not as a fatal signal.
+	 * Ignored before the first write, the connection setup's: a server that
+	 * goes away before the events are selected must be reported too. */
+	memset(&action, 0, sizeof action);
+	action.sa_handler = SIG_IGN;
+	sigemptyset(&action.sa_mask);
+	sigaction(SIGPIPE, &action, NULL);
+
 	file_descriptor = x_connect(socket_path);
 
 	if (file_descriptor < 0)
@@ -343,7 +351,7 @@ int main(int argc, char *argv[])
 	 * the next wait at once, instead of landing between the keep_running check
 	 * and the wait and going unnoticed until the next event.
 	 *
-	 * Done only now, so the defaults still apply while the connection is being
+	 * Done only now, so their defaults still apply while the connection is being
 	 * set up: SIGTERM kills a program stuck in a handshake the server never
 	 * answers. It is done before the events are selected, so by the time the
 	 * server has seen that request the handlers are in place. */
@@ -373,12 +381,6 @@ int main(int argc, char *argv[])
 	action.sa_flags   = SA_NOCLDSTOP;
 	sigemptyset(&action.sa_mask);
 	sigaction(SIGCHLD, &action, NULL);
-
-	/* A dead X server must surface as a write error, not as a fatal signal. */
-	memset(&action, 0, sizeof action);
-	action.sa_handler = SIG_IGN;
-	sigemptyset(&action.sa_mask);
-	sigaction(SIGPIPE, &action, NULL);
 
 	if (!x_select_saver(file_descriptor, major_opcode, root_window))
 	{

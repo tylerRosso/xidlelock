@@ -91,7 +91,7 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **Every test must be seen to fail.** Break `main.c` deliberately, watch that test go red, restore. A test never
   observed failing is worse than none — it reads as coverage. The suite was swept with 37 such mutations, one or more
   per test, and every one was caught — after the sweep had found three of the traps below: the shell's signal mask,
-  the inherited blocked signal, and the MappingNotify byte. The 21 caught since, by the tests and assertions added
+  the inherited blocked signal, and the MappingNotify byte. The 22 caught since, by the tests and assertions added
   after the sweep, are recorded in those tests' comment blocks; record the mutation there for any new test, and for a
   regression test.
 - **Proving that something did not happen needs a point after which it would have.** `lock-other-events` sends the
@@ -122,6 +122,10 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **fakex has two activations**: `on` is the idle timeout's, with the forced byte 0, and `forced` is what a real server
   sends for ForceScreenSaver (`xset s activate`) and a DPMS power-down, with it 1. With only `on`, a program that
   skipped forced activations passed the whole default suite; `lock-forced` pins them.
+- **fakex plays a server gone during the setup by no longer reading, not by closing.** Its `deaf` mode shuts its read
+  side before it answers the setup, so the program's next write fails with EPIPE every time. Closing after the answer
+  would race that write: the program would sometimes read the end of the stream instead, and a test of SIGPIPE would
+  fail only now and then.
 - `returns_ N cmd` asserts an exact status. Never `cmd || fail=1` — that passes on a segfault.
 - `retry_` polls; never sleep-and-hope. **Trap:** `retry_ 5 test "$(grep -c …)" -eq 3` expands the substitution once and
   compares the same stale number 250 times. Wrap it in a function, as `locker_started_` does.
@@ -174,9 +178,12 @@ User-facing documentation is in `README.md`; this file is for people changing th
   signal that arrives while an event is handled stays pending and ends the next wait at once, instead of landing
   between the `keep_running` check and the wait. SIGCHLD has a handler that does nothing: its default action is to be
   discarded without interrupting the wait, which would leave an exited locker a zombie until the next activation.
-- **Signal setup happens after `QueryExtension` and before `ScreenSaverSelectInput`.** Before it, the default actions
-  still apply, so SIGTERM kills a program stuck in a handshake the server never answers. After it, the server's having
-  seen the selection means the handlers are in place, which is the tests' readiness barrier.
+- **The handled signals are set up after `QueryExtension` and before `ScreenSaverSelectInput`.** Before it, their
+  default actions still apply, so SIGTERM kills a program stuck in a handshake the server never answers. After it, the
+  server's having seen the selection means the handlers are in place, which is the tests' readiness barrier.
+- **SIGPIPE is ignored before connecting**, so a server that goes away is a write error, reported with exit 1. It was
+  once ignored with the handled signals, after `QueryExtension`, and a server gone between the setup and that request
+  killed the program with SIGPIPE, without a word. `server-deaf` pins it.
 - **No request after the selection, and no sync.** `x_sync` skips the events that arrive ahead of its reply, so an
   activation in that window would be lost. An error answering the selection arrives in the main loop instead, and is
   fatal there.
