@@ -15,7 +15,8 @@
 # "referenced manual not found" depends on which manuals a machine has.
 #
 # Seen to fail with the -v entry deleted from the manual, with an entry for an
-# option the program lacks added to it, and with a list left unclosed.
+# option the program lacks added to it, with a list left unclosed, and with
+# the -g entry deleted.
 
 . "${srcdir=.}/tests/init.sh"
 

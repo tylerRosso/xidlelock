@@ -96,7 +96,7 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **Every test must be seen to fail.** Break `main.c` deliberately, watch that test go red, restore. A test never
   observed failing is worse than none — it reads as coverage. The suite was swept with 37 such mutations, one or more
   per test, and every one was caught — after the sweep had found three of the traps below: the shell's signal mask,
-  the inherited blocked signal, and the MappingNotify byte. The 31 caught since, by the tests and assertions added
+  the inherited blocked signal, and the MappingNotify byte. The 51 caught since, by the tests and assertions added
   after the sweep, are recorded in those tests' comment blocks; record the mutation there for any new test, and for a
   regression test.
 - **Proving that something did not happen needs a point after which it would have.** `lock-other-events` sends the
@@ -112,6 +112,14 @@ User-facing documentation is in `README.md`; this file is for people changing th
   `signal-exit` therefore also starts the program with each signal blocked, where `env` supports it.
 - **`kill -0` succeeds on a zombie.** `release_locker_` waits for it to fail, which is how the suite proves the locker
   was *reaped*, not merely that it exited.
+- **The grace command's own pid proves nothing about reaping.** `sh -c` runs it, and dash keeps the shell as its parent
+  rather than exec the command, so the stand-in's `$$` is the program's grandchild. Its process group, from
+  `grace_group_`, is the program's child whichever shell `/bin/sh` is: `posix_spawn` made it lead a session.
+  `release_grace_` waits for that to vanish.
+- **An event handled with no visible effect cannot be waited for.** A test that sent Off and On and then let the grace
+  command end could not know the program had read either: what it did with them showed only when the command ended. A
+  timeout that finds the last grace command still alive therefore locks at once rather than adopting it, which shows at
+  once, and `lock-grace-off` waits for that.
 - **Anchor `pgrep -f` on the locker's interpreter.** The program's own command line names the locker too; an
   unanchored pattern counted the program as a second locker.
 - **Lockers outlive the test's process group.** The program starts them in a session of their own, so a test's timeout
@@ -148,10 +156,12 @@ User-facing documentation is in `README.md`; this file is for people changing th
   binding so it refuses a socket already being served — that is what makes attaching to the real `:0` structurally
   impossible. Do not replace it with a bare `unlink()`.
 - `smoke-real-x` is the only test allowed near the live display: `skip_`-by-default behind `XIL_TEST_REAL_X=1`, it
-  blanks the screen for a moment with `xset s activate`, resets the saver from a `cleanup_` hook, and skips while a
-  locking daemon runs that would lock the screen for real. It uses the session's own `DISPLAY` and `XAUTHORITY`, saved
-  **before** sourcing `init.sh`, which overwrites both; it once assumed `:0` and `~/.Xauthority`, which skips on a
-  machine running `:1` and fails where a display manager keeps the cookie elsewhere.
+  blanks the screen a few times with `xset s activate`, and once with the saver's own timeout, set to `xset s 2 0` for
+  the `-g` run, the only way to read the forced byte clear from a real server. A `cleanup_` hook puts the timeout and
+  cycle back as `xset q` showed them and resets the saver, and the test skips while a locking daemon runs that would
+  lock the screen for real. It uses the session's own `DISPLAY` and `XAUTHORITY`, saved **before** sourcing `init.sh`,
+  which overwrites both; it once assumed `:0` and `~/.Xauthority`, which skips on a machine running `:1` and fails where
+  a display manager keeps the cookie elsewhere.
 - **A new source file must be added to `make_proj_`** in `tests/install-copy.sh`, `tests/install-uninstall.sh` and
   `tests/install-destdir.sh`. They build and install from a copy made of the files named there, so a file the compiler
   or `install` needs and the copy lacks — the manual is one — fails all three at the first build or install.
@@ -175,6 +185,17 @@ User-facing documentation is in `README.md`; this file is for people changing th
   this program (`QueryExtension`, `ScreenSaverSelectInput`) stay in `main.c`.
 - **Never kill the locker.** Not on exit, not on a signal, not when the server goes away: a dead locker is an unlocked
   screen. `signal-exit` pins it.
+- **The grace command is stopped, as a process group.** It guards nothing, so the saver turning off, a forced activation
+  and this program's exit all send SIGTERM, which lets the command undo what it did. To its group, because dash runs
+  `sh -c`'s command as a child: signalling the shell alone left the command running.
+- **The lock's cue is the grace command's end, never the saver's Cycle.** The X.Org server skips its saver checks while
+  DPMS has the monitor powered down (`os/WaitFor.c`), and it was observed: with the saver on and the monitor off, no
+  Cycle, nor any other event, came until input turned the saver off. A lock waiting for a Cycle would never come, and
+  nothing would say so. The program therefore keeps no time for the grace period; the command does. (Cycle also reaches
+  only a client that selects mask 2; the selection stays mask 1.)
+- **A grace period never costs the lock.** A grace command that fails, cannot be found or cannot be started ends in a
+  lock all the same, and a timeout that finds the last one still alive after an Off stopped it locks at once. A forced
+  activation (byte 17 set: `xset s activate`, DPMS) gets no grace period.
 - **The locker gets a session of its own and the signal state this program started with**: `POSIX_SPAWN_SETSID`,
   `SETSIGMASK` with the inherited mask, `SETSIGDEF` for SIGPIPE (which this program ignores, and an ignored signal
   survives exec). A Ctrl-C or a hangup aimed at this program's process group must not reach the locker.
@@ -275,6 +296,9 @@ Deliberate; revisit only if asked.
   the program reports; the first lock stands. Locking by hand with `xset s activate` avoids this.
 - **The locker must stay in the foreground until unlocked.** One that forks and exits at once (`i3lock` without `-n`)
   looks finished, so the guard lets every activation start another.
+- **The grace command must end by itself.** One that runs until it is stopped holds the lock off while the user is away.
+  A timer of the program's own would close that, at the cost of a second setting outside `xset`; it was weighed and not
+  taken.
 - **Remote displays.** TCP is rejected by the transport.
 - **Multi-screen.** The first screen's root only. (Not multi-*monitor* — Xinerama/RandR monitors share one root
   window.)

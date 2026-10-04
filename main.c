@@ -9,6 +9,10 @@
  * the one it started last is still running. `xset s activate` turns the saver on
  * at once, which makes it a lock-now command as well.
  *
+ * With a grace command, the saver's own timeout runs that first, and the lock
+ * comes when it ends: it keeps the time of the grace period, so the program
+ * keeps none.
+ *
  * The X11 wire protocol is spoken directly over the display's Unix socket, so
  * the program links against nothing but libc. Between activations it is blocked
  * in ppoll(2).
@@ -36,6 +40,9 @@
 /* The user-visible default. */
 #define DEFAULT_LOCKER "slock"
 
+/* What runs the grace command, as system(3) does. */
+#define SHELL "/bin/sh"
+
 /* The one place the version lives; a release changes it and tags vVERSION. */
 #define VERSION "1.1"
 
@@ -54,6 +61,7 @@
 #define SAVER_SELECT_INPUT 2 /* minor opcode */
 #define SAVER_NOTIFY_MASK 1u
 #define SAVER_NOTIFY 0 /* event, counted from the extension's first */
+#define SAVER_STATE_OFF 0
 #define SAVER_STATE_ON 1
 
 /* pad4() is a function, so the wire buffer needs a constant bound of its own.
@@ -159,16 +167,19 @@ static bool x_select_saver(int file_descriptor, uint8_t major_opcode, uint32_t r
 	return true;
 }
 
-/* ----------------------------------------------------------------- locker */
+/* --------------------------------------------------------------- children */
 
-/* Start the locker and return its pid, or 0 if it could not be started.
+/* Start the locker or the grace command and return its pid, or 0 if it could
+ * not be started.
  *
  * It gets a session of its own, so a signal aimed at this program's process
  * group -- a Ctrl-C in the terminal it was started from, a hangup -- cannot
- * reach the locker and unlock the screen. It also gets back the signal mask
- * this program was started with, and SIGPIPE's default action: a blocked mask
- * and an ignored signal both survive exec, where handlers do not. */
-static pid_t start_locker(char *const locker[], const sigset_t *original_mask)
+ * reach the locker and unlock the screen. That also makes it the leader of a
+ * process group, which is how a grace command is stopped as a whole. It gets
+ * back the signal mask this program was started with, and SIGPIPE's default
+ * action: a blocked mask and an ignored signal both survive exec, where
+ * handlers do not. */
+static pid_t start_child(char *const command[], const sigset_t *original_mask)
 {
 	posix_spawnattr_t attributes;
 	sigset_t          defaults;
@@ -191,17 +202,17 @@ static pid_t start_locker(char *const locker[], const sigset_t *original_mask)
 		if (result == 0)
 			result = posix_spawnattr_setsigdefault(&attributes, &defaults);
 
-		/* posix_spawnp reports a locker that cannot be run -- not found, not
+		/* posix_spawnp reports a command that cannot be run -- not found, not
 		 * executable -- as its own error, so there is no child to reap. */
 		if (result == 0)
-			result = posix_spawnp(&pid, locker[0], NULL, &attributes, locker, environ);
+			result = posix_spawnp(&pid, command[0], NULL, &attributes, command, environ);
 
 		posix_spawnattr_destroy(&attributes);
 	}
 
 	if (result != 0)
 	{
-		fprintf(stderr, PROGRAM_NAME ": cannot run '%s': %s\n", locker[0], strerror(result));
+		fprintf(stderr, PROGRAM_NAME ": cannot run '%s': %s\n", command[0], strerror(result));
 
 		return 0;
 	}
@@ -209,62 +220,92 @@ static pid_t start_locker(char *const locker[], const sigset_t *original_mask)
 	return pid;
 }
 
-/* Collect the locker if it has exited, so the next activation can start
- * another, and say so if it did not exit cleanly: a locker that failed to lock
- * the screen -- one that cannot grab the keyboard, say -- is otherwise
- * invisible. */
-static void reap_locker(pid_t *locker_pid, const char *name)
+/* Collect a child if it has exited, and say so if it did not exit cleanly,
+ * unless told to be quiet. Returns true once it has gone.
+ *
+ * A locker that failed to lock the screen -- one that cannot grab the
+ * keyboard, say -- is otherwise invisible, and so is a grace command that
+ * failed. The locker is collected at once so the next activation can start
+ * another. */
+static bool reap_child(pid_t *pid, const char *name, bool quiet)
 {
 	int   status = 0;
 	pid_t result;
 
-	if (*locker_pid == 0)
-		return;
+	if (*pid == 0)
+		return false;
 
-	result = waitpid(*locker_pid, &status, WNOHANG);
+	result = waitpid(*pid, &status, WNOHANG);
 
 	if (result == 0)
-		return; /* still running */
+		return false; /* still running */
 
-	*locker_pid = 0;
+	*pid = 0;
 
 	if (result < 0)
 	{
 		perror(PROGRAM_NAME ": waitpid");
 
-		return;
+		return true;
 	}
+
+	if (quiet)
+		return true;
 
 	if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
 		fprintf(stderr, PROGRAM_NAME ": '%s' exited with status %d.\n", name, WEXITSTATUS(status));
 	else if (WIFSIGNALED(status))
 		fprintf(stderr, PROGRAM_NAME ": '%s' was killed by signal %d.\n", name, WTERMSIG(status));
+
+	return true;
+}
+
+/* Stop the grace command: the saver turned off before it ended, or the lock is
+ * coming at once. The signal goes to its whole process group, because the
+ * shell may run the command as a child of its own rather than exec it. Unlike
+ * the locker, it guards nothing, and SIGTERM lets it undo what it did, such as
+ * dimming the screen. */
+static void stop_grace(pid_t grace_pid, bool *stopped)
+{
+	if (grace_pid == 0)
+		return;
+
+	(void)kill(-grace_pid, SIGTERM);
+	*stopped = true;
 }
 
 /* ------------------------------------------------------------------- main */
 
 static void usage(FILE *stream)
 {
-	fputs("Usage: " PROGRAM_NAME " [LOCKER [ARGUMENT]...]\n"
+	fputs("Usage: " PROGRAM_NAME " [-g COMMAND] [LOCKER [ARGUMENT]...]\n"
 	      "\n"
 	      "Start a screen locker each time the X screen saver activates.\n"
 	      "\n"
+	      "  -g, --grace=COMMAND\n"
+	      "                 when the saver times out, run COMMAND with " SHELL " first,\n"
+	      "                 and lock when it ends; the saver turning off stops it\n"
 	      "  -h, --help     show this help\n"
 	      "  -v, --version  show the version\n"
 	      "  --             end of options, so LOCKER may begin with '-'\n"
 	      "\n"
 	      "LOCKER defaults to '" DEFAULT_LOCKER "' and must stay in the foreground until the\n"
 	      "screen is unlocked. The saver activates after 'xset s SECONDS' of idle time,\n"
-	      "or at once on 'xset s activate'.\n",
+	      "or at once on 'xset s activate', which locks without a grace period.\n",
 	      stream);
 }
 
 int main(int argc, char *argv[])
 {
 	static char default_name[] = DEFAULT_LOCKER;
+	static char shell[]        = SHELL;
+	static char shell_flag[]   = "-c";
 
 	char            *default_locker[] = {default_name, NULL};
 	char           **locker           = default_locker;
+	char            *grace[]          = {shell, shell_flag, NULL, NULL}; /* [2]: the command, if any */
+	pid_t            grace_pid        = 0;
+	bool             grace_stopped    = false;
 	char             socket_path[PATH_MAX];
 	char             display_number[16];
 	uint8_t          cookie[MAX_COOKIE];
@@ -305,6 +346,30 @@ int main(int argc, char *argv[])
 			index++;
 
 			break;
+		}
+
+		if (strncmp(option, "--grace=", 8) == 0)
+		{
+			grace[2] = argv[index] + 8;
+			index++;
+
+			continue;
+		}
+
+		if (strcmp(option, "-g") == 0 || strcmp(option, "--grace") == 0)
+		{
+			if (index + 1 >= argc)
+			{
+				fprintf(stderr, PROGRAM_NAME ": option '%s' requires an argument.\n", option);
+				usage(stderr);
+
+				return EXIT_FAILURE;
+			}
+
+			grace[2] = argv[index + 1];
+			index += 2;
+
+			continue;
 		}
 
 		fprintf(stderr, PROGRAM_NAME ": unknown option '%s'.\n", option);
@@ -394,7 +459,13 @@ int main(int argc, char *argv[])
 		struct pollfd watch;
 		uint8_t       event[32];
 
-		reap_locker(&locker_pid, locker[0]);
+		(void)reap_child(&locker_pid, locker[0], false);
+
+		/* A grace command that ended by itself is the cue to lock, however it
+		 * ended: one that failed must not cost the lock. One stopped here is
+		 * not. */
+		if (reap_child(&grace_pid, grace[2], grace_stopped) && !grace_stopped && locker_pid == 0)
+			locker_pid = start_child(locker, &original_mask);
 
 		watch.fd      = file_descriptor;
 		watch.events  = POLLIN;
@@ -431,23 +502,56 @@ int main(int argc, char *argv[])
 			break;
 		}
 
-		/* Off, Cycle, and whatever the server sends every client: not ours. */
-		if ((event[0] & ~X_EVENT_SENT) != first_event + SAVER_NOTIFY || event[1] != SAVER_STATE_ON)
+		/* Whatever the server sends every client: not ours. */
+		if ((event[0] & ~X_EVENT_SENT) != first_event + SAVER_NOTIFY)
+			continue;
+
+		/* The user is back before the grace command ended: no lock. */
+		if (event[1] == SAVER_STATE_OFF)
+		{
+			stop_grace(grace_pid, &grace_stopped);
+
+			continue;
+		}
+
+		/* Cycle: the saver changing its picture. */
+		if (event[1] != SAVER_STATE_ON)
 			continue;
 
 		/* The locker may have exited while this event was on its way. */
-		reap_locker(&locker_pid, locker[0]);
+		(void)reap_child(&locker_pid, locker[0], false);
 
 		/* Still locked from last time. A second locker would only fail to grab
 		 * the keyboard, or worse, stack a second lock on the first. */
 		if (locker_pid != 0)
 			continue;
 
-		locker_pid = start_locker(locker, &original_mask);
+		/* Byte 17, forced, is set for every activation but the saver's own
+		 * timeout: `xset s activate`, DPMS powering the monitor down. Those
+		 * lock at once, as every activation does without a grace command, and
+		 * so does a timeout that finds the last grace command still there after
+		 * an Off stopped it: it ignored that, and a grace period that never
+		 * ends would never lock. */
+		if (grace[2] == NULL || event[17] != 0 || grace_pid != 0)
+		{
+			stop_grace(grace_pid, &grace_stopped);
+			locker_pid = start_child(locker, &original_mask);
+
+			continue;
+		}
+
+		/* The saver timed out: the grace period comes first. */
+		grace_stopped = false;
+		grace_pid     = start_child(grace, &original_mask);
+
+		/* One that cannot be run locks at once rather than never. */
+		if (grace_pid == 0)
+			locker_pid = start_child(locker, &original_mask);
 	}
 
 	/* The locker is deliberately left running: killing it would unlock the
-	 * screen, which is never this program's call. */
+	 * screen, which is never this program's call. A grace command is stopped. */
+	stop_grace(grace_pid, &grace_stopped);
 	close(file_descriptor);
 
 	return ok ? EXIT_SUCCESS : EXIT_FAILURE;

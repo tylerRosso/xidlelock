@@ -77,11 +77,12 @@ see below.
 ## Usage
 
 ```
-xidlelock [LOCKER [ARGUMENT]...]
+xidlelock [-g COMMAND] [LOCKER [ARGUMENT]...]
 ```
 
 | Option | Description |
 |---|---|
+| `-g`, `--grace=COMMAND` | When the saver times out, run `COMMAND` with `/bin/sh` first, and lock when it ends |
 | `-h`, `--help` | Show usage |
 | `-v`, `--version` | Show the version |
 | `--` | End of options, so a `LOCKER` may begin with `-` |
@@ -92,6 +93,7 @@ Everything from the first operand on is the locker's command line, passed throug
 ```sh
 xidlelock                   # slock, each time the saver activates
 xidlelock i3lock -n         # -n: i3lock must not fork, see below
+xidlelock -g 'sleep 15'     # slock, after a 15-second grace period
 ```
 
 **When it locks.** On a `ScreenSaverNotify` with state *On*: the saver's idle timeout, `xset s activate`, or DPMS
@@ -99,6 +101,20 @@ powering the monitor down, by its own timers or on `xset dpms force off` — the
 does. Not when the saver turns off, cycles, or anything else arrives. The timeouts are the server's, `xset q` shows
 both, and the lock comes with whichever expires first. `xset s off` stops only the saver's own: with DPMS still on,
 the lock comes when the monitor powers down, and with `xset -dpms` as well, nothing locks by itself.
+
+**A grace period, with `-g`.** When the saver's own idle timeout turns it on, `COMMAND` runs first, through `/bin/sh`,
+and the lock comes when it ends — by itself, however it ends. The saver has already blanked the screen, so moving the
+mouse before then brings it back without a password; that turns the saver off, which stops the command (`SIGTERM` to its
+process group) and locks nothing. An activation you asked for, `xset s activate`, or DPMS powering the monitor down,
+locks at once. The command keeps the time, so it has to **end by itself**, as `sleep 15` does: one that runs until it is
+stopped holds the lock off for as long as you stay away. One that fails or cannot be found is reported, and the lock
+comes all the same. For a grace period to happen at all, the saver has to time out before DPMS powers the monitor down:
+
+```sh
+xset s 585
+xset dpms 600 600 600
+xidlelock -g 'sleep 15' &   # blank at 585 s, lock at 600 s as the monitor powers down
+```
 
 **One locker at a time.** An activation while the locker it started is still running starts nothing, since the saver
 times out again on an already locked screen as soon as you walk away. The locker therefore has to **stay in the
@@ -136,7 +152,7 @@ Runnable from any directory, by absolute path, or through a symlink. A full rebu
 incremental build: one compile-and-link, always from scratch. Every build regenerates `compile_commands.json` via
 `clang -MJ`, so clangd sees the real flags and musl sysroot.
 
-The release binary is 54928 bytes at every level from `-O1` to `-Oz`. The debug build carries
+The release binary is 54936 bytes at every level from `-O1` to `-Oz`. The debug build carries
 `-fsanitize=undefined,local-bounds -fsanitize-minimal-runtime`, the only sanitizer that links against static musl. For a
 full ASan run, build a throwaway dynamic binary with the system compiler:
 
@@ -174,7 +190,7 @@ TEST_TIMEOUT=120 ./build.sh test   # slower machine
 ```
 
 ```
-30 passed, 0 failed, 1 skipped, 0 errored
+35 passed, 0 failed, 1 skipped, 0 errored
 ```
 
 **Black box only** — every test runs the built binary and checks what it did. `tests/fakex.c` is a fake X server that
@@ -183,13 +199,15 @@ never touches a real display and never runs the real `slock`: a stand-in locker 
 Tests assert against literal protocol numbers, never the program's own macros, and the extension's opcode and event
 are checked at two different values, since a real server assigns them at startup.
 
-Every test has been seen to fail: 68 deliberate breakages of the program, `build.sh` and the manual, each caught by the
+Every test has been seen to fail: 88 deliberate breakages of the program, `build.sh` and the manual, each caught by the
 suite. `doc-manpage` lints the manual and checks that it lists exactly the options the program's usage does; it needs
 `mandoc`, and is skipped without it.
 
-`smoke-real-x` is the one test that touches your desktop. It is skipped unless `XIL_TEST_REAL_X=1`; it blanks the screen
-for a moment with `xset s activate` and checks that the stand-in locker starts against the real server, resets the saver
-from a `cleanup_` hook, and skips while a locking daemon is running that would lock the screen for real.
+`smoke-real-x` is the one test that touches your desktop. It is skipped unless `XIL_TEST_REAL_X=1`, and skips while a
+locking daemon is running that would lock the screen for real. It blanks the screen a few times and checks against the
+real server that `xset s activate` starts the stand-in locker, with or without `-g`, and that with `-g` the saver's own
+timeout runs the grace command first. For that it sets the timeout to two seconds, so **keep your hands off the keyboard
+and mouse** while it runs; a `cleanup_` hook puts your saver settings back and resets the saver.
 
 See `AGENTS.md` for the rules a new test has to follow.
 
@@ -205,7 +223,15 @@ polling for the idle time on a timer, is what `xautolock` does.
 **Why not libX11.** Speaking the protocol directly needs no X11 headers and no static libX11, neither of which a static
 musl toolchain usually has, and suits a program that makes exactly two requests: `QueryExtension("MIT-SCREEN-SAVER")`
 for the extension's opcode and first event number, then `ScreenSaverSelectInput` on the root window. After that it only
-reads 32-byte events, compares the code (with the SendEvent bit masked off) and the state, and ignores the rest.
+reads 32-byte events, compares the code (with the SendEvent bit masked off), the state and, with a grace command, the
+forced byte, and ignores the rest.
+
+**Why the grace command keeps the time.** The saver itself could: with `xset s TIMEOUT CYCLE` the server sends a *Cycle*
+event every `CYCLE` seconds while you stay away, and a lock could wait for the first. But the X.Org server skips its
+saver checks while DPMS has the monitor powered down (`os/WaitFor.c`): with the saver on and the monitor off, there is
+no event at all until input comes, and that turns the saver off. A lock waiting for a Cycle would never come, and
+nothing would say so. Observed with `xset s 5 5` and `xset dpms 8 8 8`: On at 5 s, then twenty seconds of silence where,
+without DPMS, Cycles came at 10 and 15 s.
 
 **No sync after the selection.** An error answering `ScreenSaverSelectInput` arrives in the event loop and ends the
 program there; a `GetInputFocus` round trip would add nothing but a window in which an activation could be skipped.
@@ -233,7 +259,7 @@ copied here; `wire-sync` compares the two copies when a checkout of xrootclock s
 ├── build.sh                 # release | debug | run | test | install | uninstall | clean
 ├── tests/init.sh            # harness, modelled on gnulib/coreutils init.sh
 ├── tests/fakex.c            # fake X server with MIT-SCREEN-SAVER, so tests never touch a real display
-├── tests/*.sh               # 31 black-box tests
+├── tests/*.sh               # 36 black-box tests
 ├── .clang-format            # clang-format style for the C files
 ├── .gitignore
 ├── .vscode/                 # lldb-dap launch config and build tasks, tracked on purpose

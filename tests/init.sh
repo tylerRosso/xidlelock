@@ -349,30 +349,40 @@ stop_xil_ ()
 # leave it behind.
 make_locker_ ()
 {
-	make_locker_name_=${1:-locker}
+	make_stand_in_ "${1:-locker}" locker "${2:-0}"
+}
 
-	cat > "$make_locker_name_" <<EOF
+# make_grace_ [STATUS] -- the same, as a grace command named `grace`, logging
+# to grace.log and let go by release_grace_.
+make_grace_ ()
+{
+	make_stand_in_ grace grace "${1:-0}"
+}
+
+# make_stand_in_ FILE ROLE STATUS -- write FILE, which logs to ROLE.log and
+# waits for ROLE.release.
+make_stand_in_ ()
+{
+	cat > "$1" <<EOF
 #!/bin/sh
 dir='$PWD'
 line="start \$\$"
 for arg; do line="\$line [\$arg]"; done
-printf '%s\n' "\$line" >> "\$dir/locker.log"
+printf '%s\n' "\$line" >> "\$dir/$2.log"
 i=0
-while test -d "\$dir" && test ! -e "\$dir/locker.release" &&
+while test -d "\$dir" && test ! -e "\$dir/$2.release" &&
 	test \$i -lt 600
 do
 	sleep 0.05
 	i=\$((i + 1))
 done
-printf 'exit %s\n' "\$\$" >> "\$dir/locker.log"
-exit ${2:-0}
+printf 'exit %s\n' "\$\$" >> "\$dir/$2.log"
+exit $3
 EOF
 
-	test -s "$make_locker_name_" ||
-		framework_failure_ 'cannot write the locker'
+	test -s "$1" || framework_failure_ "cannot write the $2"
 
-	chmod +x "$make_locker_name_" ||
-		framework_failure_ 'cannot make the locker executable'
+	chmod +x "$1" || framework_failure_ "cannot make the $2 executable"
 }
 
 # locker_started_ N -- true once exactly N lockers have started.
@@ -420,6 +430,51 @@ release_locker_ ()
 }
 
 locker_gone_ () { ! kill -0 "$release_locker_pid_" 2> /dev/null; }
+
+# ----------------------------------------------------- the fake grace command
+
+# grace_started_ N -- true once exactly N grace commands have started; a log
+# not written yet counts as none, as in locker_started_.
+grace_started_ ()
+{
+	grace_started_n_=$(grep -c '^start ' grace.log 2> /dev/null)
+	test "${grace_started_n_:-0}" -eq "$1"
+}
+
+# grace_pid_ N -- the pid of the Nth grace command started; nothing before
+# the first has started.
+grace_pid_ ()
+{
+	sed -n 's/^start \([0-9]*\).*/\1/p' grace.log 2> /dev/null | sed -n "$1p"
+}
+
+# grace_group_ PID -- the process group of the running grace command PID, which
+# is the program's own child: posix_spawn made it lead a session. It is the
+# shell when the shell runs the command as a child, as dash does, and the
+# command itself when the shell execs it.
+grace_group_ ()
+{
+	ps -o pgid= -p "$1" | tr -d ' '
+}
+
+# gone_ PID -- true once PID no longer exists. A child of the program's exists
+# until the program has REAPED it, since kill -0 succeeds on a zombie.
+gone_ () { ! kill -0 "$1" 2> /dev/null; }
+
+# release_grace_ GROUP -- let the running grace command end by itself, and wait
+# until the program has reaped GROUP, from grace_group_. Fails if that
+# takes longer than 5 seconds.
+release_grace_ ()
+{
+	: > grace.release
+
+	retry_ 5 gone_ "$1"
+	release_grace_status_=$?
+
+	rm -f grace.release
+
+	return $release_grace_status_
+}
 
 # ------------------------------------------------------- tmpdir and teardown
 
