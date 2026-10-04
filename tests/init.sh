@@ -376,9 +376,14 @@ EOF
 }
 
 # locker_started_ N -- true once exactly N lockers have started.
+#
+# A log not written yet counts as none. grep prints no count for a file it
+# cannot open, and `test` complains about the empty number on every poll: 500
+# lines from a test that waited in vain for its first locker.
 locker_started_ ()
 {
-	test "$(grep -c '^start ' locker.log 2> /dev/null)" -eq "$1"
+	locker_started_n_=$(grep -c '^start ' locker.log 2> /dev/null)
+	test "${locker_started_n_:-0}" -eq "$1"
 }
 
 # lockers_running_ -- how many of this test's lockers exist right now.
@@ -390,10 +395,11 @@ lockers_running_ ()
 	pgrep -f -- "^/bin/sh $PWD/locker( |\$)" | wc -l
 }
 
-# locker_pid_ N -- the pid of the Nth locker started.
+# locker_pid_ N -- the pid of the Nth locker started; nothing before the
+# first has started.
 locker_pid_ ()
 {
-	sed -n 's/^start \([0-9]*\).*/\1/p' locker.log | sed -n "$1p"
+	sed -n 's/^start \([0-9]*\).*/\1/p' locker.log 2> /dev/null | sed -n "$1p"
 }
 
 # release_locker_ PID -- let the running locker exit, and wait until the
