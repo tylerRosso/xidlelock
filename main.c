@@ -44,7 +44,7 @@
 #define SHELL "/bin/sh"
 
 /* The one place the version lives; a release changes it and tags vVERSION. */
-#define VERSION "1.1"
+#define VERSION "1.2"
 
 /* X11 protocol constants (X11/Xproto.h). The transport's own live in xwire.h. */
 #define X_OPCODE_QUERY_EXTENSION 98
