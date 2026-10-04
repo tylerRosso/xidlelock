@@ -199,7 +199,7 @@ never touches a real display and never runs the real `slock`: a stand-in locker 
 Tests assert against literal protocol numbers, never the program's own macros, and the extension's opcode and event
 are checked at two different values, since a real server assigns them at startup.
 
-Every test has been seen to fail: 88 deliberate breakages of the program, `build.sh` and the manual, each caught by the
+Every test has been seen to fail: 91 deliberate breakages of the program, `build.sh` and the manual, each caught by the
 suite. `doc-manpage` lints the manual and checks that it lists exactly the options the program's usage does; it needs
 `mandoc`, and is skipped without it.
 

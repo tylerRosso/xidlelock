@@ -96,7 +96,7 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **Every test must be seen to fail.** Break `main.c` deliberately, watch that test go red, restore. A test never
   observed failing is worse than none — it reads as coverage. The suite was swept with 37 such mutations, one or more
   per test, and every one was caught — after the sweep had found three of the traps below: the shell's signal mask,
-  the inherited blocked signal, and the MappingNotify byte. The 51 caught since, by the tests and assertions added
+  the inherited blocked signal, and the MappingNotify byte. The 54 caught since, by the tests and assertions added
   after the sweep, are recorded in those tests' comment blocks; record the mutation there for any new test, and for a
   regression test.
 - **Proving that something did not happen needs a point after which it would have.** `lock-other-events` sends the
@@ -166,9 +166,11 @@ User-facing documentation is in `README.md`; this file is for people changing th
   `tests/install-destdir.sh`. They build and install from a copy made of the files named there, so a file the compiler
   or `install` needs and the copy lacks — the manual is one — fails all three at the first build or install.
 - `doc-manpage` compares the options in the usage with the tags of the manual's OPTIONS section as `mandoc` renders
-  them, found by their indent: two spaces in the usage, five in the rendering. It pipes through `col -bx`, not `-b`,
-  which turns runs of spaces into tabs. Its lint is `-W warning`, leaving out the style notes: "referenced manual not
-  found" depends on which manuals a machine has installed.
+  them, found by their indent: two spaces in the usage, five in the rendering. Each tag is compared whole, with any
+  `=ARGUMENT` made `=ARG`, since the usage writes it in capitals and the rendering in lower case. Compared only up to
+  its first space, which took the short option and its comma, a misspelt long option passed. It pipes through `col -bx`,
+  not `-b`, which turns runs of spaces into tabs. Its lint is `-W warning`, leaving out the style notes: "referenced
+  manual not found" depends on which manuals a machine has installed.
 
 ## Code Conventions
 
