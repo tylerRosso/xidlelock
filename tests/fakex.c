@@ -32,15 +32,20 @@
  *
  *   usage: fakex DISPLAYNUM MODE CONTROL
  *
- *   MODE   ok       normal service
- *          moved    normal service, with the extension at 150 and 95
- *          refuse   reject the connection setup with a reason string
- *          nosaver  report MIT-SCREEN-SAVER as absent
- *          error    answer ScreenSaverSelectInput with an X error (code 9)
- *          split    send every reply and event in two writes, to exercise
- *                   short reads
- *          deaf     stop reading, then answer the connection setup, so the
- *                   client's first request fails with EPIPE
+ *   MODE   ok           normal service
+ *          moved        normal service, with the extension at 150 and 95
+ *          refuse       reject the connection setup with a reason string
+ *          nosaver      report MIT-SCREEN-SAVER as absent
+ *          error        answer ScreenSaverSelectInput with an X error (code 9)
+ *          split        send every reply and event in two writes, to exercise
+ *                       short reads
+ *          deaf         stop reading, then answer the connection setup, so the
+ *                       client's first request fails with EPIPE
+ *          queryerror   answer QueryExtension with an X error (code 11)
+ *          queryhangup  close the connection instead of answering
+ *                       QueryExtension
+ *          querydeaf    stop reading, then answer QueryExtension, so the
+ *                       client's next request fails with EPIPE
  *
  * Log lines:
  *   LISTENING <path>
@@ -81,7 +86,10 @@ enum mode
 	MODE_NOSAVER,
 	MODE_ERROR,
 	MODE_SPLIT,
-	MODE_DEAF
+	MODE_DEAF,
+	MODE_QUERY_ERROR,
+	MODE_QUERY_HANGUP,
+	MODE_QUERY_DEAF
 };
 
 static volatile sig_atomic_t running = 1;
@@ -342,6 +350,32 @@ static bool send_mapping_notify(int file_descriptor)
 	return write_all(file_descriptor, packet, sizeof packet);
 }
 
+/* Answer QueryExtension, or misbehave as the mode says. Returns false once the
+ * client should be dropped. */
+static bool answer_query(int file_descriptor, bool present)
+{
+	/* Gone without a reply, with the client waiting for one. */
+	if (server_mode == MODE_QUERY_HANGUP)
+		return false;
+
+	if (server_mode == MODE_QUERY_ERROR)
+		return send_error(file_descriptor, 11, 98, 0);
+
+	/* Stopped reading first, as in deaf mode, so the client's next request
+	 * fails with EPIPE however soon it comes. */
+	if (server_mode == MODE_QUERY_DEAF && shutdown(file_descriptor, SHUT_RD) != 0)
+	{
+		perror("fakex: shutdown");
+
+		return false;
+	}
+
+	if (!send_extension_reply(file_descriptor, present))
+		return false;
+
+	return server_mode != MODE_QUERY_DEAF;
+}
+
 /* Log the extension name with non-printables escaped, so a shell test can
  * compare a single stable line. */
 static void log_extension_name(const uint8_t *name, size_t length)
@@ -398,7 +432,7 @@ static bool serve_request(int file_descriptor)
 
 		is_saver = name_length == 16 && memcmp(request + 8, "MIT-SCREEN-SAVER", 16) == 0;
 
-		if (!send_extension_reply(file_descriptor, is_saver && server_mode != MODE_NOSAVER))
+		if (!answer_query(file_descriptor, is_saver && server_mode != MODE_NOSAVER))
 			return false;
 	}
 	else if (request[0] == 43) /* GetInputFocus */
@@ -615,7 +649,8 @@ int main(int argc, char *argv[])
 
 	if (argc != 4)
 	{
-		fprintf(stderr, "usage: fakex DISPLAYNUM ok|moved|refuse|nosaver|error|split|deaf CONTROL\n");
+		fprintf(stderr, "usage: fakex DISPLAYNUM "
+		                "ok|moved|refuse|nosaver|error|split|deaf|queryerror|queryhangup|querydeaf CONTROL\n");
 
 		return 2;
 	}
@@ -640,6 +675,12 @@ int main(int argc, char *argv[])
 		server_mode = MODE_SPLIT;
 	else if (strcmp(mode_name, "deaf") == 0)
 		server_mode = MODE_DEAF;
+	else if (strcmp(mode_name, "queryerror") == 0)
+		server_mode = MODE_QUERY_ERROR;
+	else if (strcmp(mode_name, "queryhangup") == 0)
+		server_mode = MODE_QUERY_HANGUP;
+	else if (strcmp(mode_name, "querydeaf") == 0)
+		server_mode = MODE_QUERY_DEAF;
 	else
 	{
 		fprintf(stderr, "fakex: unknown mode '%s'\n", mode_name);

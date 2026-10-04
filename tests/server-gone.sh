@@ -10,7 +10,13 @@
 # seconds, which turns either into a failure (137).
 #
 # Pins: exit status exactly 1, and the diagnostic, for a server that closes the
-# connection and for one that is killed outright.
+# connection and for one that is killed outright; and for one that closes it
+# instead of answering QueryExtension, the same, as the only line on stderr.
+#
+# The last was seen to fail with the diagnostic taken out of the wait for the
+# QueryExtension reply (exit 1 without a word), and with that wait returning
+# success on the end of the stream (a second diagnostic, for the selection
+# that followed). The gap was present since the initial import, 7a20770.
 
 . "${srcdir=.}/tests/init.sh"
 
@@ -49,5 +55,24 @@ grep -q "$expected" xil.err ||
 
 # fakex was killed before it could remove its socket.
 rm -f "/tmp/.X11-unix/X${DISPLAY#:}"
+
+# 3. The server hangs up instead of answering QueryExtension. Started without
+# start_xil_: a program that makes no selection never reaches its barrier.
+start_fakex_ queryhangup
+
+"$XIL" "$PWD/locker" > xil.out 2> xil.err &
+xil_pid_=$!
+wait_xil_
+
+test "$xil_status_" -eq 1 ||
+	{ warn_ "$ME_: no reply: expected exit 1, got $xil_status_"; fail=1; }
+
+grep -q "$expected" xil.err ||
+	{ warn_ 'no diagnostic for a hangup before the reply'; fail=1; }
+
+test "$(wc -l < xil.err)" -eq 1 ||
+	{ warn_ 'expected one line on stderr'; cat xil.err >&2; fail=1; }
+
+fakex_grep_ '^QUERYEXTENSION ' || fail=1
 
 Exit $fail

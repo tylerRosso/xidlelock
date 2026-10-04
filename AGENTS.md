@@ -96,7 +96,7 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **Every test must be seen to fail.** Break `main.c` deliberately, watch that test go red, restore. A test never
   observed failing is worse than none — it reads as coverage. The suite was swept with 37 such mutations, one or more
   per test, and every one was caught — after the sweep had found three of the traps below: the shell's signal mask,
-  the inherited blocked signal, and the MappingNotify byte. The 23 caught since, by the tests and assertions added
+  the inherited blocked signal, and the MappingNotify byte. The 29 caught since, by the tests and assertions added
   after the sweep, are recorded in those tests' comment blocks; record the mutation there for any new test, and for a
   regression test.
 - **Proving that something did not happen needs a point after which it would have.** `lock-other-events` sends the
@@ -127,10 +127,11 @@ User-facing documentation is in `README.md`; this file is for people changing th
 - **fakex has two activations**: `on` is the idle timeout's, with the forced byte 0, and `forced` is what a real server
   sends for ForceScreenSaver (`xset s activate`) and a DPMS power-down, with it 1. With only `on`, a program that
   skipped forced activations passed the whole default suite; `lock-forced` pins them.
-- **fakex plays a server gone during the setup by no longer reading, not by closing.** Its `deaf` mode shuts its read
-  side before it answers the setup, so the program's next write fails with EPIPE every time. Closing after the answer
-  would race that write: the program would sometimes read the end of the stream instead, and a test of SIGPIPE would
-  fail only now and then.
+- **fakex plays a server gone during the setup by no longer reading, not by closing.** Its `deaf` and `querydeaf` modes
+  shut its read side before they answer the setup and `QueryExtension`, so the program's next write fails with EPIPE
+  every time. Closing after the answer would race that write: the program would sometimes read the end of the stream
+  instead, and a test of SIGPIPE would fail only now and then. `queryhangup` closes instead of answering, which races
+  nothing: the program has nothing left to write before the reply it waits for.
 - `returns_ N cmd` asserts an exact status. Never `cmd || fail=1` — that passes on a segfault.
 - `retry_` polls; never sleep-and-hope. **Trap:** `retry_ 5 test "$(grep -c …)" -eq 3` expands the substitution once and
   compares the same stale number 250 times. Wrap it in a function, as `locker_started_` does.
