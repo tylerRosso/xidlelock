@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: ISC
 
 # `--` ends the options, so a locker whose name begins with '-' can be named.
+# A lone '-' needs no `--`: it is an operand, as it is to getopt(3).
 #
 # Pins: without --, such a name is an unknown option (exit 1, before any
-# connection is made); after --, it is found on PATH and run.
+# connection is made); after --, it is found on PATH and run; and a locker
+# named '-' is found and run without one.
+#
+# Seen to fail with the test for a lone '-' taken out of the option loop: the
+# program refused it as an unknown option. The gap was present since the
+# initial import, 7a20770.
 
 . "${srcdir=.}/tests/init.sh"
 
@@ -28,6 +34,21 @@ start_xil_ -- -dashed
 
 fakex_send_ on
 retry_ 5 locker_started_ 1 || fail_ 'the -- locker never started'
+
+release_locker_ "$(locker_pid_ 1)" || fail=1
+
+# A lone '-'. fakex serves one client at a time, and the new one's selection
+# must not be found in the old log, so both start afresh.
+stop_xil_
+stop_fakex_
+start_fakex_
+rm -f locker.log
+
+make_locker_ ./-
+start_xil_ -
+
+fakex_send_ on
+retry_ 5 locker_started_ 1 || fail_ "the locker named '-' never started"
 
 release_locker_ "$(locker_pid_ 1)" || fail=1
 
