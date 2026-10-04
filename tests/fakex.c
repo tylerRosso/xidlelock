@@ -41,6 +41,8 @@
  *                       short reads
  *          deaf         stop reading, then answer the connection setup, so the
  *                       client's first request fails with EPIPE
+ *          early        send two MappingNotify events ahead of the
+ *                       QueryExtension reply
  *          queryerror   answer QueryExtension with an X error (code 11)
  *          queryhangup  close the connection instead of answering
  *                       QueryExtension
@@ -87,6 +89,7 @@ enum mode
 	MODE_ERROR,
 	MODE_SPLIT,
 	MODE_DEAF,
+	MODE_EARLY,
 	MODE_QUERY_ERROR,
 	MODE_QUERY_HANGUP,
 	MODE_QUERY_DEAF
@@ -360,6 +363,19 @@ static bool answer_query(int file_descriptor, bool present)
 
 	if (server_mode == MODE_QUERY_ERROR)
 		return send_error(file_descriptor, 11, 98, 0);
+
+	/* Two, so a client that skipped only one would take the second for the
+	 * reply. */
+	if (server_mode == MODE_EARLY)
+	{
+		for (int i = 0; i < 2; i++)
+		{
+			if (!send_mapping_notify(file_descriptor))
+				return false;
+
+			printf("SENT mapping\n");
+		}
+	}
 
 	/* Stopped reading first, as in deaf mode, so the client's next request
 	 * fails with EPIPE however soon it comes. */
@@ -650,7 +666,7 @@ int main(int argc, char *argv[])
 	if (argc != 4)
 	{
 		fprintf(stderr, "usage: fakex DISPLAYNUM "
-		                "ok|moved|refuse|nosaver|error|split|deaf|queryerror|queryhangup|querydeaf CONTROL\n");
+		                "ok|moved|refuse|nosaver|error|split|deaf|early|queryerror|queryhangup|querydeaf CONTROL\n");
 
 		return 2;
 	}
@@ -675,6 +691,8 @@ int main(int argc, char *argv[])
 		server_mode = MODE_SPLIT;
 	else if (strcmp(mode_name, "deaf") == 0)
 		server_mode = MODE_DEAF;
+	else if (strcmp(mode_name, "early") == 0)
+		server_mode = MODE_EARLY;
 	else if (strcmp(mode_name, "queryerror") == 0)
 		server_mode = MODE_QUERY_ERROR;
 	else if (strcmp(mode_name, "queryhangup") == 0)
